@@ -1,0 +1,18 @@
+# Dependencies
+node_modules/
+
+# Build output and tooling cache
+dist/
+coverage/
+.vite/
+
+# Environment secrets
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+
+# OS files
+.DS_Store

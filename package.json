@@ -1,0 +1,10 @@
+{
+  "name": "video-call-lab",
+  "private": true,
+  "packageManager": "pnpm@12.18.0",
+  "scripts": {
+    "dev:client": "pnpm --filter video-call-lab dev",
+    "dev:server": "pnpm --filter server dev",
+    "build:client": "pnpm --filter video-call-lab build"
+  }
+}
