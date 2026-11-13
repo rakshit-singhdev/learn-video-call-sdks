@@ -2,6 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 import { useNavigate, useParams, useLocation } from "react-router-dom";
 import { ArrowLeft, Copy, Video } from "lucide-react";
 import { apiRequest } from "../services/api.js";
+import DeviceCheck from "../components/DeviceCheck.jsx";
 
 const providerCalls = {
   agora: lazy(() => import("../providers/agora/AgoraCall.jsx")),
@@ -21,6 +22,12 @@ function CallRoom() {
   const [joining, setJoining] = useState(false);
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
+  const [mediaSettings, setMediaSettings] = useState({
+    microphoneEnabled: true,
+    cameraEnabled: true,
+    microphoneId: "",
+    cameraId: "",
+  });
 
   useEffect(() => {
     let active = true;
@@ -102,6 +109,7 @@ function CallRoom() {
           credentials={credentials}
           displayName={displayName}
           roomName={room?.roomName || roomId}
+          mediaSettings={mediaSettings}
           onLeave={leaveCall}
         />
       </Suspense>
@@ -131,7 +139,19 @@ function CallRoom() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-xl px-6 py-16">
+      <main className="mx-auto grid max-w-5xl gap-6 px-4 py-8 sm:px-6 lg:grid-cols-[1.35fr_1fr] lg:items-start lg:py-14">
+        <section className="rounded-2xl border border-white/10 bg-[#171a23] p-4 shadow-xl sm:p-6">
+          <h2 className="mb-4 text-sm font-semibold text-gray-300">
+            Check your camera and microphone
+          </h2>
+          <DeviceCheck
+            settings={mediaSettings}
+            onChange={setMediaSettings}
+            displayName={displayName}
+            showDevicePickers={room?.provider !== "jitsi"}
+          />
+        </section>
+
         <section className="rounded-2xl border border-white/10 bg-[#171a23] p-6 shadow-xl sm:p-8">
           <div className="mb-6 flex h-12 w-12 items-center justify-center rounded-xl bg-indigo-500/10 text-indigo-400">
             <Video size={24} />

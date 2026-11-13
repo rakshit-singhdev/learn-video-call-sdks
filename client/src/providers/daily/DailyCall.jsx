@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import DailyIframe from "@daily-co/daily-js";
 import CallInterface from "../../components/CallInterface.jsx";
 
+const DEFAULT_MEDIA_SETTINGS = { microphoneEnabled: true, cameraEnabled: true };
+
 function getDailyTrack(participant, type) {
   const track = participant.tracks?.[type];
   if (!track || ["off", "blocked"].includes(track.state)) {
@@ -10,17 +12,64 @@ function getDailyTrack(participant, type) {
   return track.persistentTrack || track.track || null;
 }
 
-function DailyCall({ credentials, displayName, roomName, onLeave }) {
+function toParticipants(dailyParticipants) {
+  return dailyParticipants.flatMap((participant) => {
+    const videoTrack = getDailyTrack(participant, "video");
+    const audioTrack = getDailyTrack(participant, "audio");
+    const screenTrack = getDailyTrack(participant, "screenVideo");
+    const name = participant.user_name || "Guest";
+
+    const tiles = [
+      {
+        id: participant.session_id,
+        name,
+        isLocal: participant.local,
+        videoTrack,
+        audioTrack,
+        cameraEnabled: Boolean(videoTrack && participant.video !== false),
+        audioEnabled: Boolean(audioTrack && participant.audio !== false),
+      },
+    ];
+
+    if (screenTrack) {
+      tiles.push({
+        id: `${participant.session_id}-screen`,
+        name,
+        isLocal: participant.local,
+        isScreen: true,
+        videoTrack: screenTrack,
+        cameraEnabled: true,
+        audioEnabled: false,
+      });
+    }
+
+    return tiles;
+  });
+}
+
+function DailyCall({
+  credentials,
+  displayName,
+  roomName,
+  mediaSettings = DEFAULT_MEDIA_SETTINGS,
+  onLeave,
+}) {
   const callObjectRef = useRef(null);
+  const initialMediaRef = useRef(mediaSettings);
   const [participants, setParticipants] = useState([]);
-  const [microphoneEnabled, setMicrophoneEnabled] = useState(true);
-  const [cameraEnabled, setCameraEnabled] = useState(true);
+  const [microphoneEnabled, setMicrophoneEnabled] = useState(
+    mediaSettings.microphoneEnabled
+  );
+  const [cameraEnabled, setCameraEnabled] = useState(mediaSettings.cameraEnabled);
+  const [screenSharing, setScreenSharing] = useState(false);
   const [connecting, setConnecting] = useState(true);
   const [error, setError] = useState("");
 
-  const toggleMicrophone = useCallback(async () => {
+  // forcedState (boolean) sets the mic explicitly, e.g. for push-to-talk
+  const toggleMicrophone = useCallback(async (forcedState) => {
     try {
-      const next = !microphoneEnabled;
+      const next =
+        typeof forcedState === "boolean" ? forcedState : !microphoneEnabled;
       await callObjectRef.current?.setLocalAudio(next);
       setMicrophoneEnabled(next);
     } catch (toggleError) {
@@ -38,29 +87,28 @@ function DailyCall({ credentials, displayName, roomName, onLeave }) {
     }
   }, [cameraEnabled]);
 
+  const toggleScreenShare = useCallback(() => {
+    const callObject = callObjectRef.current;
+    if (!callObject) return;
+    // State is updated by the local-screen-share-* events below
+    if (screenSharing) callObject.stopScreenShare();
+    else callObject.startScreenShare();
+  }, [screenSharing]);
+
   useEffect(() => {
-    const callObject = DailyIframe.createCallObject();
+    const initialMedia = initialMediaRef.current;
+    const callObject = DailyIframe.createCallObject({
+      audioSource: initialMedia.microphoneId || true,
+      videoSource: initialMedia.cameraId || true,
+      startAudioOff: !initialMedia.microphoneEnabled,
+      startVideoOff: !initialMedia.cameraEnabled,
+    });
     callObjectRef.current = callObject;
     let disposed = false;
 
     const updateParticipants = () => {
       if (disposed) return;
-      const dailyParticipants = Object.values(callObject.participants());
-      setParticipants(
-        dailyParticipants.map((participant) => {
-          const videoTrack = getDailyTrack(participant, "video");
-          const audioTrack = getDailyTrack(participant, "audio");
-          return {
-            id: participant.session_id,
-            name: participant.user_name || "Guest",
-            isLocal: participant.local,
-            videoTrack,
-            audioTrack,
-            cameraEnabled: Boolean(videoTrack && participant.video !== false),
-            audioEnabled: Boolean(audioTrack && participant.audio !== false),
-          };
-        })
-      );
+      setParticipants(toParticipants(Object.values(callObject.participants())));
     };
 
     const handleError = (event) => {
@@ -69,14 +117,25 @@ function DailyCall({ credentials, displayName, roomName, onLeave }) {
       }
     };
 
+    const handleScreenShareStarted = () => {
+      if (!disposed) setScreenSharing(true);
+    };
+    const handleScreenShareStopped = () => {
+      if (!disposed) setScreenSharing(false);
+    };
+
     const events = [
       "joined-meeting",
       "participant-joined",
       "participant-updated",
       "participant-left",
+      "track-started",
+      "track-stopped",
     ];
     events.forEach((event) => callObject.on(event, updateParticipants));
     callObject.on("error", handleError);
+    callObject.on("local-screen-share-started", handleScreenShareStarted);
+    callObject.on("local-screen-share-stopped", handleScreenShareStopped);
 
     const connect = async () => {
       try {
@@ -103,6 +162,8 @@ function DailyCall({ credentials, displayName, roomName, onLeave }) {
       disposed = true;
       events.forEach((event) => callObject.off(event, updateParticipants));
       callObject.off("error", handleError);
+      callObject.off("local-screen-share-started", handleScreenShareStarted);
+      callObject.off("local-screen-share-stopped", handleScreenShareStopped);
       void (async () => {
         try {
           await callObject.leave();
@@ -126,8 +187,10 @@ function DailyCall({ credentials, displayName, roomName, onLeave }) {
       participants={participants}
       microphoneEnabled={microphoneEnabled}
       cameraEnabled={cameraEnabled}
+      screenSharing={screenSharing}
       onToggleMicrophone={toggleMicrophone}
       onToggleCamera={toggleCamera}
+      onToggleScreenShare={toggleScreenShare}
       onLeave={onLeave}
       connecting={connecting}
       error={error}

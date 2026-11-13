@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import CallInterface from "../../components/CallInterface.jsx";
 
+const DEFAULT_MEDIA_SETTINGS = { microphoneEnabled: true, cameraEnabled: true };
+
+
 const jitsiScriptPromises = new Map();
 
 function loadJitsiApi(domain) {
@@ -24,8 +27,15 @@ function loadJitsiApi(domain) {
   return jitsiScriptPromises.get(domain);
 }
 
-function JitsiCall({ credentials, displayName, roomName, onLeave }) {
+function JitsiCall({
+  credentials,
+  displayName,
+  roomName,
+  mediaSettings = DEFAULT_MEDIA_SETTINGS,
+  onLeave,
+}) {
   const containerRef = useRef(null);
+  const initialMediaRef = useRef(mediaSettings);
   const [connecting, setConnecting] = useState(true);
   const [error, setError] = useState("");
 
@@ -44,8 +54,8 @@ function JitsiCall({ credentials, displayName, roomName, onLeave }) {
           userInfo: { displayName },
           configOverwrite: {
             prejoinPageEnabled: false,
-            startWithAudioMuted: false,
-            startWithVideoMuted: false,
+            startWithAudioMuted: !initialMediaRef.current.microphoneEnabled,
+            startWithVideoMuted: !initialMediaRef.current.cameraEnabled,
           },
         });
         api.addListener("videoConferenceJoined", () => setConnecting(false));
@@ -80,7 +90,7 @@ function JitsiCall({ credentials, displayName, roomName, onLeave }) {
     >
       <div
         ref={containerRef}
-        className="min-h-[65vh] overflow-hidden rounded-xl border border-white/10 bg-[#171a23]"
+        className="absolute inset-0 overflow-hidden rounded-xl border border-white/10 bg-[#171a23] [&>iframe]:h-full! [&>iframe]:w-full!"
       />
     </CallInterface>
   );

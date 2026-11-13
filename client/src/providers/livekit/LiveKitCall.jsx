@@ -2,11 +2,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Room, RoomEvent, Track } from "livekit-client";
 import CallInterface from "../../components/CallInterface.jsx";
 
-function getLiveKitTrack(participant, kind) {
-  const publication = [...participant.trackPublications.values()].find(
-    (item) => item.kind === kind
-  );
-  return publication?.track || null;
+const DEFAULT_MEDIA_SETTINGS = { microphoneEnabled: true, cameraEnabled: true };
+
+function getTrack(participant, source) {
+  return participant.getTrackPublication(source)?.track || null;
 }
 
 function getParticipants(room) {
@@ -15,32 +14,67 @@ function getParticipants(room) {
     ...room.remoteParticipants.values(),
   ];
 
-  return allParticipants.map((participant) => {
-    const videoTrack = getLiveKitTrack(participant, Track.Kind.Video);
-    const audioTrack = getLiveKitTrack(participant, Track.Kind.Audio);
-    return {
-      id: participant.identity,
-      name: participant.name || participant.identity,
-      isLocal: participant === room.localParticipant,
-      videoTrack,
-      audioTrack,
-      cameraEnabled: Boolean(videoTrack && !videoTrack.isMuted),
-      audioEnabled: Boolean(audioTrack && !audioTrack.isMuted),
-    };
+  return allParticipants.flatMap((participant) => {
+    const isLocal = participant === room.localParticipant;
+    const name = participant.name || participant.identity;
+    const videoTrack = getTrack(participant, Track.Source.Camera);
+    const audioTrack = getTrack(participant, Track.Source.Microphone);
+    const screenTrack = getTrack(participant, Track.Source.ScreenShare);
+
+    const tiles = [
+      {
+        id: participant.identity,
+        name,
+        isLocal,
+        videoTrack,
+        audioTrack,
+        cameraEnabled: Boolean(videoTrack && !videoTrack.isMuted),
+        audioEnabled: Boolean(audioTrack && !audioTrack.isMuted),
+      },
+    ];
+
+    if (screenTrack) {
+      tiles.push({
+        id: `${participant.identity}-screen`,
+        name,
+        isLocal,
+        isScreen: true,
+        videoTrack: screenTrack,
+        cameraEnabled: true,
+        audioEnabled: false,
+      });
+    }
+
+    return tiles;
   });
 }
 
-function LiveKitCall({ credentials, roomName, onLeave }) {
+function isPickerCancelled(error) {
+  return error?.name === "NotAllowedError" || error?.name === "AbortError";
+}
+
+function LiveKitCall({
+  credentials,
+  roomName,
+  mediaSettings = DEFAULT_MEDIA_SETTINGS,
+  onLeave,
+}) {
   const roomRef = useRef(null);
+  const initialMediaRef = useRef(mediaSettings);
   const [participants, setParticipants] = useState([]);
-  const [microphoneEnabled, setMicrophoneEnabled] = useState(true);
-  const [cameraEnabled, setCameraEnabled] = useState(true);
+  const [microphoneEnabled, setMicrophoneEnabled] = useState(
+    mediaSettings.microphoneEnabled
+  );
+  const [cameraEnabled, setCameraEnabled] = useState(mediaSettings.cameraEnabled);
+  const [screenSharing, setScreenSharing] = useState(false);
   const [connecting, setConnecting] = useState(true);
   const [error, setError] = useState("");
 
-  const toggleMicrophone = useCallback(async () => {
+  // forcedState (boolean) sets the mic explicitly, e.g. for push-to-talk
+  const toggleMicrophone = useCallback(async (forcedState) => {
     try {
-      const next = !microphoneEnabled;
+      const next =
+        typeof forcedState === "boolean" ? forcedState : !microphoneEnabled;
       await roomRef.current.localParticipant.setMicrophoneEnabled(next);
       setMicrophoneEnabled(next);
     } catch (toggleError) {
@@ -58,13 +92,40 @@ function LiveKitCall({ credentials, roomName, onLeave }) {
     }
   }, [cameraEnabled]);
 
+  const toggleScreenShare = useCallback(async () => {
+    const room = roomRef.current;
+    if (!room) return;
+    try {
+      await room.localParticipant.setScreenShareEnabled(
+        !room.localParticipant.isScreenShareEnabled
+      );
+    } catch (shareError) {
+      if (!isPickerCancelled(shareError)) {
+        setError(shareError.message || "Unable to share your screen.");
+      }
+    }
+  }, []);
+
   useEffect(() => {
-    const room = new Room({ adaptiveStream: true, dynacast: true });
+    const initialMedia = initialMediaRef.current;
+    const room = new Room({
+      adaptiveStream: true,
+      dynacast: true,
+      // Selected devices are used whenever mic/camera get enabled
+      audioCaptureDefaults: initialMedia.microphoneId
+        ? { deviceId: initialMedia.microphoneId }
+        : undefined,
+      videoCaptureDefaults: initialMedia.cameraId
+        ? { deviceId: initialMedia.cameraId }
+        : undefined,
+    });
     roomRef.current = room;
     let disposed = false;
 
     const updateParticipants = () => {
-      if (!disposed) setParticipants(getParticipants(room));
+      if (disposed) return;
+      setParticipants(getParticipants(room));
+      setScreenSharing(room.localParticipant.isScreenShareEnabled);
     };
 
     const events = [
@@ -72,6 +133,8 @@ function LiveKitCall({ credentials, roomName, onLeave }) {
       RoomEvent.TrackUnsubscribed,
       RoomEvent.TrackPublished,
       RoomEvent.TrackUnpublished,
+      RoomEvent.LocalTrackPublished,
+      RoomEvent.LocalTrackUnpublished,
       RoomEvent.ParticipantConnected,
       RoomEvent.ParticipantDisconnected,
       RoomEvent.TrackMuted,
@@ -82,8 +145,8 @@ function LiveKitCall({ credentials, roomName, onLeave }) {
     const connect = async () => {
       try {
         await room.connect(credentials.serverUrl, credentials.token);
-        await room.localParticipant.setMicrophoneEnabled(true);
-        await room.localParticipant.setCameraEnabled(true);
+        await room.localParticipant.setMicrophoneEnabled(initialMedia.microphoneEnabled);
+        await room.localParticipant.setCameraEnabled(initialMedia.cameraEnabled);
         if (!disposed) {
           updateParticipants();
           setConnecting(false);
@@ -113,8 +176,10 @@ function LiveKitCall({ credentials, roomName, onLeave }) {
       participants={participants}
       microphoneEnabled={microphoneEnabled}
       cameraEnabled={cameraEnabled}
+      screenSharing={screenSharing}
       onToggleMicrophone={toggleMicrophone}
       onToggleCamera={toggleCamera}
+      onToggleScreenShare={toggleScreenShare}
       onLeave={onLeave}
       connecting={connecting}
       error={error}

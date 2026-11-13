@@ -10,6 +10,22 @@ const APP_CERTIFICATE = process.env.AGORA_APP_CERTIFICATE;
 // Token validity: 1 hour
 const TOKEN_EXPIRY_SECONDS = 60 * 60;
 
+// Screen share runs as a second Agora client. Its uid is `uid + 2^31`, so
+// participant uids stay below 2^31 and clients can recognise screen users.
+const SCREEN_UID_OFFSET = 2 ** 31;
+
+function buildToken(channelName, uid) {
+  return RtcTokenBuilder.buildTokenWithUid(
+    APP_ID,
+    APP_CERTIFICATE,
+    channelName,
+    uid,
+    RtcRole.PUBLISHER,
+    TOKEN_EXPIRY_SECONDS,
+    TOKEN_EXPIRY_SECONDS
+  );
+}
+
 // Create Agora room configuration
 export async function createAgoraRoom({ roomId, roomName }) {
   if (!APP_ID || !APP_CERTIFICATE) {
@@ -36,17 +52,11 @@ export async function joinAgoraRoom({
     throw new Error("Agora credentials are missing");
   }
 
-  const uid = crypto.randomInt(1, 2 ** 32);
+  const uid = crypto.randomInt(1, SCREEN_UID_OFFSET);
+  const screenUid = uid + SCREEN_UID_OFFSET;
 
-  const token = RtcTokenBuilder.buildTokenWithUid(
-    APP_ID,
-    APP_CERTIFICATE,
-    room.channelName,
-    uid,
-    RtcRole.PUBLISHER,
-    TOKEN_EXPIRY_SECONDS,
-    TOKEN_EXPIRY_SECONDS
-  );
+  const token = buildToken(room.channelName, uid);
+  const screenToken = buildToken(room.channelName, screenUid);
 
   const expiresAt =
     Math.floor(Date.now() / 1000) + TOKEN_EXPIRY_SECONDS;
@@ -56,6 +66,8 @@ export async function joinAgoraRoom({
     channelName: room.channelName,
     uid,
     token,
+    screenUid,
+    screenToken,
     expiresAt,
     role: "publisher",
   };
