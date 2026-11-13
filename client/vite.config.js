@@ -7,5 +7,6 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   server: {
     host: true,
-  },
+    allowedHosts:["primp-snowbird-geometry.ngrok-free.dev"]
+  }
 })
