@@ -137,8 +137,8 @@ function CallRoom() {
             <Video size={24} />
           </div>
           <h1 className="text-2xl font-bold">Join video call</h1>
-          <p className="mt-2 text-sm text-gray-400">
-            Room ID: <><span className="font-mono text-gray-200">{roomId}</span> <span className="text-gray-200"><Copy size={16} /></span></>
+          <p className="flex gap-2 mt-2 text-sm text-gray-400">
+            Room ID: <span className="font-mono text-gray-200">{roomId}</span> <span className="text-gray-200"><Copy size={16} className="cursor-pointer" onClick={() => copyRoomLink()}/></span>
           </p>
           {room && (
             <p className="mt-1 text-sm capitalize text-gray-400">
