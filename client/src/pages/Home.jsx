@@ -1,62 +1,108 @@
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Video,
-  Radio,
   Plus,
   LogIn,
   ArrowRight,
   Wifi,
 } from "lucide-react";
-
-const providers = [
-  {
-    id: "agora",
-    name: "Agora",
-    description: "Real-time communication",
-  },
-  {
-    id: "daily",
-    name: "Daily",
-    description: "Video calling API",
-  },
-  {
-    id: "livekit",
-    name: "LiveKit",
-    description: "WebRTC infrastructure",
-  },
-  {
-    id: "jitsi",
-    name: "Jitsi",
-    description: "Open-source conferencing",
-  },
-];
+import ProviderSelector from "../components/ProviderSelector.jsx";
+import { apiRequest } from "../services/api.js";
 
 function Home() {
   const navigate = useNavigate();
 
-  const [provider, setProvider] = useState("agora");
+  const [enabledProviders, setEnabledProviders] = useState([]);
+  const [provider, setProvider] = useState(null);
+  const [checkingServer, setCheckingServer] = useState(true);
   const [name, setName] = useState("");
   const [roomId, setRoomId] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let active = true;
+
+    apiRequest("/health")
+      .then(({ provider: legacyProvider, defaultProvider, providers }) => {
+        const nextProviders = Array.isArray(providers)
+          ? providers
+          : legacyProvider
+            ? [legacyProvider]
+            : [];
+        const selectedProvider = defaultProvider || legacyProvider;
+        const supportedProviders = ["agora", "daily", "livekit", "jitsi"];
+
+        if (
+          nextProviders.length === 0 ||
+          nextProviders.some(
+            (enabledProvider) => !supportedProviders.includes(enabledProvider)
+          ) ||
+          !nextProviders.includes(selectedProvider)
+        ) {
+          throw new Error("The server reported an unsupported video provider");
+        }
+        if (active) {
+          setEnabledProviders(nextProviders);
+          setProvider(selectedProvider);
+        }
+      })
+      .catch((requestError) => {
+        if (active) {
+          setError(requestError.message || "Unable to connect to the server");
+        }
+      })
+      .finally(() => {
+        if (active) setCheckingServer(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const openRoom = (id) => {
     if (!name.trim()) {
-      alert("Please enter your display name");
+      setError("Enter your display name before joining a room.");
       return;
     }
 
+    setError("");
     navigate(`/room/${id}`, {
       state: {
-        provider,
         name: name.trim(),
       },
     });
   };
 
-  const createRoom = () => {
-    const id = crypto.randomUUID().slice(0, 8);
-    openRoom(id);
+  const createRoom = async () => {
+    if (!name.trim()) {
+      setError("Enter your display name before creating a room.");
+      return;
+    }
+
+    if (!provider) {
+      setError("The video server is unavailable.");
+      return;
+    }
+
+    setBusy(true);
+    setError("");
+    try {
+      const response = await apiRequest("/api/rooms", {
+        method: "POST",
+        body: JSON.stringify({ provider }),
+      });
+      navigate(`/room/${response.data.roomId}`, {
+        state: { name: name.trim() },
+      });
+    } catch (requestError) {
+      setError(requestError.message || "Unable to create the room.");
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
@@ -94,8 +140,8 @@ function Home() {
           </h1>
 
           <p className="mt-4 text-sm leading-6 text-gray-400 sm:text-base">
-            Explore, integrate and compare different video calling
-            providers using a single application.
+            Create rooms with any provider enabled by the server, or join an
+            existing room using its provider.
           </p>
         </section>
 
@@ -104,13 +150,18 @@ function Home() {
 
           {/* Display name */}
           <div className="mb-7">
-            <label className="mb-2 block text-sm font-medium text-gray-300">
+            <label
+              htmlFor="display-name"
+              className="mb-2 block text-sm font-medium text-gray-300"
+            >
               Display Name
             </label>
 
             <input
+              id="display-name"
               type="text"
               value={name}
+              maxLength={50}
               onChange={(e) => setName(e.target.value)}
               placeholder="Enter your name"
               className="w-full rounded-lg border border-white/10 bg-[#0f1117] px-4 py-3 text-sm text-white outline-none transition placeholder:text-gray-600 focus:border-indigo-500"
@@ -119,74 +170,36 @@ function Home() {
 
           {/* Provider selection */}
           <div className="mb-7">
-            <div className="mb-3 flex items-center justify-between">
-              <label className="text-sm font-medium text-gray-300">
-                Select Video Provider
-              </label>
-
-              <span className="text-xs text-gray-500">
-                {providers.length} available
-              </span>
-            </div>
-
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              {providers.map((item) => {
-                const selected = provider === item.id;
-
-                return (
-                  <button
-                    key={item.id}
-                    onClick={() => setProvider(item.id)}
-                    className={`flex items-center gap-4 rounded-xl border p-4 text-left transition ${
-                      selected
-                        ? "border-indigo-500 bg-indigo-500/10"
-                        : "border-white/10 bg-[#0f1117] hover:border-white/30"
-                    }`}
-                  >
-                    <div
-                      className={`rounded-lg p-2.5 ${
-                        selected
-                          ? "bg-indigo-500/20 text-indigo-400"
-                          : "bg-white/5 text-gray-400"
-                      }`}
-                    >
-                      <Radio size={20} />
-                    </div>
-
-                    <div className="flex-1">
-                      <p className="text-sm font-semibold text-white">
-                        {item.name}
-                      </p>
-
-                      <p className="mt-1 text-xs text-gray-500">
-                        {item.description}
-                      </p>
-                    </div>
-
-                    <div
-                      className={`h-4 w-4 rounded-full border ${
-                        selected
-                          ? "border-indigo-500 bg-indigo-500"
-                          : "border-gray-600"
-                      }`}
-                    >
-                      {selected && (
-                        <div className="m-1 h-1.5 w-1.5 rounded-full bg-white" />
-                      )}
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
+            <ProviderSelector
+              enabledProviders={enabledProviders}
+              selectedProvider={provider}
+              onSelect={(selectedProvider) => {
+                setProvider(selectedProvider);
+                setError("");
+              }}
+              loading={checkingServer}
+            />
           </div>
+
+          {error && (
+            <p role="alert" className="mb-4 rounded-lg bg-red-500/10 px-4 py-3 text-sm text-red-300">
+              {error}
+            </p>
+          )}
 
           {/* Create room */}
           <button
             onClick={createRoom}
-            className="flex w-full items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 py-3.5 text-sm font-semibold text-white transition hover:bg-indigo-500 active:scale-[0.99]"
+            disabled={
+              busy ||
+              checkingServer ||
+              !enabledProviders.includes(provider) ||
+              !name.trim()
+            }
+            className="flex w-full items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 py-3.5 text-sm font-semibold text-white transition hover:bg-indigo-500 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50"
           >
             <Plus size={18} />
-            Create New Room
+            {busy ? "Creating room..." : "Create New Room"}
             <ArrowRight size={17} />
           </button>
 
@@ -204,7 +217,7 @@ function Home() {
               value={roomId}
               onChange={(e) => setRoomId(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === "Enter" && roomId.trim()) {
+                if (e.key === "Enter" && roomId.trim() && !busy) {
                   openRoom(roomId.trim());
                 }
               }}
@@ -214,7 +227,7 @@ function Home() {
 
             <button
               onClick={() => openRoom(roomId.trim())}
-              disabled={!roomId.trim()}
+              disabled={!roomId.trim() || !name.trim() || busy}
               className="flex items-center justify-center gap-2 rounded-lg bg-white/10 px-6 py-3 text-sm font-semibold text-white transition hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-40"
             >
               <LogIn size={17} />

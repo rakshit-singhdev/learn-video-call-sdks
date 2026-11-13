@@ -5,14 +5,35 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
-const { VIDEO_PROVIDER } = await import("./config/provider.js");
+const {
+  DEFAULT_VIDEO_PROVIDER,
+  VIDEO_PROVIDERS,
+} = await import("./config/provider.js");
 const { default: roomsRouter } = await import("./routes/rooms.js");
 
 const app = express();
 
-app.use(cors({
-  origin: process.env.CLIENT_URL,
-}));
+const clientOrigins = (process.env.CLIENT_URL || "")
+  .split(",")
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
+app.use(
+  cors({
+    origin(origin, callback) {
+      const localDevelopmentOrigin =
+        process.env.NODE_ENV !== "production" &&
+        /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin || "");
+
+      if (!origin || clientOrigins.includes(origin) || localDevelopmentOrigin) {
+        callback(null, true);
+        return;
+      }
+
+      callback(new Error("Origin is not allowed by CORS"));
+    },
+  })
+);
 
 app.use(express.json());
 
@@ -20,7 +41,9 @@ app.get("/health", (req, res) => {
   res.json({
     success: true,
     message: "Video Call Lab API is running",
-    provider: VIDEO_PROVIDER,
+    provider: DEFAULT_VIDEO_PROVIDER,
+    defaultProvider: DEFAULT_VIDEO_PROVIDER,
+    providers: VIDEO_PROVIDERS,
   });
 });
 

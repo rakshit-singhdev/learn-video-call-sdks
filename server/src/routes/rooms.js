@@ -4,6 +4,7 @@ import crypto from "crypto";
 import {
   getVideoProviderService,
   VIDEO_PROVIDER,
+  VIDEO_PROVIDERS,
 } from "../config/provider.js";
 
 const router = Router();
@@ -23,9 +24,17 @@ function sendError(res, status, message) {
 router.post("/", async (req, res) => {
   try {
     const { provider, roomName } = req.body;
+    const selectedProvider = provider === undefined ? VIDEO_PROVIDER : provider;
 
-    if (provider !== undefined && provider !== VIDEO_PROVIDER) {
-      return sendError(res, 400, `This server uses the ${VIDEO_PROVIDER} provider`);
+    if (
+      typeof selectedProvider !== "string" ||
+      !VIDEO_PROVIDERS.includes(selectedProvider)
+    ) {
+      return sendError(
+        res,
+        400,
+        `Provider must be enabled on this server. Enabled providers: ${VIDEO_PROVIDERS.join(", ")}`
+      );
     }
 
     if (
@@ -39,7 +48,7 @@ router.post("/", async (req, res) => {
 
     const name = roomName?.trim() || `room-${roomId.slice(0, 8)}`;
 
-    const service = await getVideoProviderService();
+    const service = await getVideoProviderService(selectedProvider);
     const providerData = await service.create({
       roomId,
       roomName: name,
@@ -48,7 +57,7 @@ router.post("/", async (req, res) => {
     const room = {
       roomId,
       roomName: name,
-      provider: VIDEO_PROVIDER,
+      provider: selectedProvider,
       createdAt: new Date(),
       ...providerData,
     };
@@ -87,7 +96,7 @@ router.post("/:id/join", async (req, res) => {
 
     const participantId = crypto.randomUUID();
 
-    const service = await getVideoProviderService();
+    const service = await getVideoProviderService(room.provider);
     const providerData = await service.join({
       room,
       participantId,
@@ -141,7 +150,7 @@ router.delete("/:id", async (req, res) => {
     }
 
     // Delete room from the selected provider
-    const service = await getVideoProviderService();
+    const service = await getVideoProviderService(room.provider);
     await service.delete(room);
 
     // Remove local record only after provider cleanup succeeds
